@@ -1,9 +1,6 @@
 package org.avaje.k8s.discovery;
 
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -48,9 +45,6 @@ import java.util.stream.Collectors;
  * }</pre>
  */
 public class K8sMemberDiscovery {
-
-	private static final Logger log = LoggerFactory.getLogger(K8sMemberDiscovery.class);
-
 
 	private String master = "https://kubernetes.default.svc.cluster.local:443";
 
@@ -113,9 +107,32 @@ public class K8sMemberDiscovery {
 	}
 
 	/**
+	 * Find and return the Ip address of the other service members.
+	 */
+	public List<String> findOtherIps() {
+		return mapIps(findOtherMembers());
+	}
+
+	/**
+	 * Find and return the Ip address of all service members.
+	 */
+	public List<String> findAllIps() {
+		return mapIps(findAllMembers());
+	}
+
+	/**
+	 * Extract out the Ip Address only from the members.
+	 */
+	public List<String> mapIps(List<K8sServiceMember> members) {
+		return members.stream()
+				.map(K8sServiceMember::getIpAddress)
+				.collect(Collectors.toList());
+	}
+
+	/**
 	 * Return the members filtering out the current pod if it is set.
 	 */
-	public List<K8sServiceMember> findMembers() {
+	public List<K8sServiceMember> findOtherMembers() {
 
 		List<K8sServiceMember> members = fetchAllMembers();
 		if (podName == null) {
@@ -128,13 +145,13 @@ public class K8sMemberDiscovery {
 	}
 
 	/**
-	 * Return all the members including the current pod.
+	 * Return all the members of this service including the current pod.
 	 */
 	public List<K8sServiceMember> findAllMembers() {
 		return fetchAllMembers();
 	}
 
-	private List<K8sServiceMember> fetchAllMembers() {
+	protected List<K8sServiceMember> fetchAllMembers() {
 
 		String path = "/api/v1/namespaces/" + namespace + "/endpoints/" + serviceName;
 
