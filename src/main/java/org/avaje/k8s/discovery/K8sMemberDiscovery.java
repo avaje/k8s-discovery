@@ -1,6 +1,9 @@
 package org.avaje.k8s.discovery;
 
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -19,8 +22,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Find the members of service in a K8s cluster and namespace.
- *
+ * Find the members of service in a Kubernetes cluster and namespace.
+ * <p>
  * <pre>{@code
  *
  *   // use defaults which reads namespace from
@@ -28,10 +31,10 @@ import java.util.stream.Collectors;
  *
  *   List<K8sServiceMember> members =
  *       new K8sMemberDiscovery("my-service")
- *       .findAllMembers();
+ *       .getAllMembers();
  *
  * }</pre>
- *
+ * <p>
  * <pre>{@code
  *
  *   // explicit namespace
@@ -40,29 +43,33 @@ import java.util.stream.Collectors;
  *   List<K8sServiceMember> members =
  *       new K8sMemberDiscovery("my-service", "dev")
  *       .setPodName(currentPod)
- *       .findMembers();
+ *       .getOtherMembers();
  *
  * }</pre>
  */
 public class K8sMemberDiscovery {
 
-	private String master = "https://kubernetes.default.svc.cluster.local:443";
+	private static final Logger log = LoggerFactory.getLogger(K8sMemberDiscovery.class);
 
-	private String accountToken = "/var/run/secrets/kubernetes.io/serviceaccount/token";
+	protected String masterUrl = "https://kubernetes.default.svc.cluster.local:443";
 
-	private String serviceName;
+	protected String accountToken = "/var/run/secrets/kubernetes.io/serviceaccount/token";
 
-	private String namespace;
+	protected String serviceName;
 
-	private String podName;
+	protected String namespace;
+
+	protected String podName;
+
+	protected K8sServiceMembers members;
 
 	/**
 	 * Create with a given service name.
 	 */
 	public K8sMemberDiscovery(String serviceName) {
 		this.serviceName = serviceName;
-		this.namespace = System.getenv("POD_NAMESPACE");
-		this.podName = System.getenv("POD_NAME");
+		this.namespace = read("POD_NAMESPACE");
+		this.podName = read("POD_NAME");
 	}
 
 	/**
@@ -71,30 +78,30 @@ public class K8sMemberDiscovery {
 	public K8sMemberDiscovery(String serviceName, String namespace) {
 		this.serviceName = serviceName;
 		this.namespace = namespace;
+		this.podName = read("POD_NAME");
 	}
 
-	/**
-	 * Set the master URL to use.
-	 */
-	public K8sMemberDiscovery setMaster(String master) {
-		this.master = master;
-		return this;
+	private String read(String key) {
+		return System.getProperty(key, System.getenv(key));
 	}
 
 	/**
 	 * Set the service name to find members for.
 	 */
 	public K8sMemberDiscovery setServiceName(String serviceName) {
-		this.serviceName = serviceName;
+		if (serviceName != null) {
+			this.serviceName = serviceName;
+		}
 		return this;
-
 	}
 
 	/**
 	 * Set the namespace to search. Default to read env POD_NAMESPACE.
 	 */
 	public K8sMemberDiscovery setNamespace(String namespace) {
-		this.namespace = namespace;
+		if (namespace != null) {
+			this.namespace = namespace;
+		}
 		return this;
 	}
 
@@ -102,26 +109,64 @@ public class K8sMemberDiscovery {
 	 * Set the name of the current pod (to filter out). Default to read env POD_NAME.
 	 */
 	public K8sMemberDiscovery setPodName(String podName) {
-		this.podName = podName;
+		if (podName != null) {
+			this.podName = podName;
+		}
 		return this;
 	}
 
 	/**
-	 * Find and return the Ip address of the other service members.
+	 * Sets Kubernetes master API url.
 	 */
-	public List<String> findOtherIps() {
-		return mapIps(findOtherMembers());
+	public K8sMemberDiscovery setMasterUrl(String masterUrl) {
+		if (masterUrl != null) {
+			this.masterUrl = masterUrl;
+		}
+		return this;
 	}
 
 	/**
-	 * Find and return the Ip address of all service members.
+	 * Set the account token.
+	 * <p>
+	 * By default account token is read from '/var/run/secrets/kubernetes.io/serviceaccount/token'.
 	 */
-	public List<String> findAllIps() {
-		return mapIps(findAllMembers());
+	public K8sMemberDiscovery setAccountToken(String accountToken) {
+		if (accountToken != null) {
+			this.accountToken = accountToken;
+		}
+		return this;
 	}
 
 	/**
-	 * Extract out the Ip Address only from the members.
+	 * Return the masterUrl used.
+	 */
+	public String getMasterUrl() {
+		return masterUrl;
+	}
+
+	/**
+	 * Return the service name used.
+	 */
+	public String getServiceName() {
+		return serviceName;
+	}
+
+	/**
+	 * Return the namespace used.
+	 */
+	public String getNamespace() {
+		return namespace;
+	}
+
+	/**
+	 * Return the podName used (Often set as environment variable POD_NAME).
+	 */
+	public String getPodName() {
+		return podName;
+	}
+
+	/**
+	 * Extract out the Ip Address from the members.
 	 */
 	public List<String> mapIps(List<K8sServiceMember> members) {
 		return members.stream()
@@ -130,34 +175,103 @@ public class K8sMemberDiscovery {
 	}
 
 	/**
+	 * Return the Ip address of the other service members.
+	 */
+	public List<String> getOtherIps() {
+		return mapIps(getOtherMembers());
+	}
+
+	/**
+	 * Return the Ip address of all service members.
+	 */
+	public List<String> getAllIps() {
+		return mapIps(getAllMembers());
+	}
+
+	/**
+	 * Return the Ip address of this pod (matched by pod name).
+	 */
+	public String getMemberIp() {
+		K8sServiceMember member = getMember();
+		return member != null ? member.getIpAddress() : null;
+	}
+
+	/**
+	 * Return this pod (matched by pod name) or null searching both the members and 'notReady' members.
+	 */
+	public K8sServiceMember getMember() {
+		loadIfRequired();
+		if (podName == null) {
+			return null;
+
+		} else {
+			return members.findPod(podName);
+		}
+	}
+
+	/**
 	 * Return the members filtering out the current pod if it is set.
 	 */
-	public List<K8sServiceMember> findOtherMembers() {
+	public List<K8sServiceMember> getOtherMembers() {
 
-		List<K8sServiceMember> members = fetchAllMembers();
+		loadIfRequired();
 		if (podName == null) {
-			return members;
+			return members.getMembers();
 		}
 		// filter out the current pod
-		return members
-				.stream().filter(it -> !podName.equals(it.getPodName()) )
+		return members.getMembers()
+				.stream().filter(it -> !podName.equals(it.getPodName()))
 				.collect(Collectors.toList());
 	}
 
 	/**
 	 * Return all the members of this service including the current pod.
 	 */
-	public List<K8sServiceMember> findAllMembers() {
-		return fetchAllMembers();
+	public List<K8sServiceMember> getAllMembers() {
+		loadIfRequired();
+		return members.getMembers();
 	}
 
-	protected List<K8sServiceMember> fetchAllMembers() {
+	/**
+	 * Return all the not ready members of this service.
+	 * This can include the current pod.
+	 */
+	public List<K8sServiceMember> getNotReadyMembers() {
+		loadIfRequired();
+		return members.getNotReady();
+	}
+
+	/**
+	 * Return the members.
+	 */
+	public K8sServiceMembers getMembers() {
+		loadIfRequired();
+		return members;
+	}
+
+	/**
+	 * Force a reload of the members from the kubernetes master.
+	 */
+	public void reload() {
+		members = loadAllMembers();
+	}
+
+	protected void loadIfRequired() {
+		if (members == null || members.isEmpty()) {
+			members = loadAllMembers();
+			log.debug("loaded all members for service:{} namespace:{} members:{}", serviceName, namespace, members);
+		}
+	}
+
+	protected K8sServiceMembers loadAllMembers() {
 
 		String path = "/api/v1/namespaces/" + namespace + "/endpoints/" + serviceName;
 
 		try {
-
-			URL url = new URL(master + path);
+			if (log.isTraceEnabled()) {
+				log.trace("loading member content from:{}", masterUrl + path);
+			}
+			URL url = new URL(masterUrl + path);
 			HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
 			conn.setHostnameVerifier(trustAllHosts);
 
@@ -166,8 +280,10 @@ public class K8sMemberDiscovery {
 			conn.setSSLSocketFactory(ctx.getSocketFactory());
 			conn.addRequestProperty("Authorization", "Bearer " + serviceAccountToken(accountToken));
 
-
 			String jsonContent = readContent(conn);
+			if (log.isTraceEnabled()) {
+				log.trace("K8s endpoints json: " + jsonContent);
+			}
 			return new MemberParser(jsonContent).parseJson();
 
 		} catch (Exception e) {
@@ -191,23 +307,6 @@ public class K8sMemberDiscovery {
 		}
 		return sb.toString();
 	}
-
-	/**
-	 * Sets Kubernetes master API url.
-	 */
-	public void setMasterUrl(String master) {
-		this.master = master;
-	}
-
-	/**
-	 * Set the account token.
-	 *
-	 * By default account token is read from '/var/run/secrets/kubernetes.io/serviceaccount/token'.
-	 */
-	public void setAccountToken(String accountToken) {
-		this.accountToken = accountToken;
-	}
-
 
 	/**
 	 * Reads content of the service account token file.

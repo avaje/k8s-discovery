@@ -1,8 +1,5 @@
 package org.avaje.k8s.discovery;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Helper that parses the JSON content to List of K8sServiceMember.
  *
@@ -13,13 +10,14 @@ class MemberParser {
 
 	private static final String SUBSETS = "\"subsets\":[";
 	private static final String ADDRESSES = "\"addresses\":[";
+	private static final String NOT_READY_ADDRESSES = "\"notReadyAddresses\":[";
 	private static final String END_QUOTE = "\"";
 
 	private final String rawJson;
 
 	private int pos;
 
-	private List<K8sServiceMember> members = new ArrayList<>();
+	private K8sServiceMembers members = new K8sServiceMembers();
 
 	/**
 	 * Create with raw JSON content.
@@ -31,21 +29,29 @@ class MemberParser {
 	/**
 	 * Parse returning the list of members.
 	 */
-	public List<K8sServiceMember> parseJson() {
+	public K8sServiceMembers parseJson() {
 
-		pos = rawJson.indexOf(SUBSETS);
-		if (pos > -1) {
-			pos = rawJson.indexOf(ADDRESSES, pos);
+		int subsets = rawJson.indexOf(SUBSETS);
+		if (subsets > -1) {
+			pos = rawJson.indexOf(ADDRESSES, subsets);
 			if (pos > -1) {
-				// loop find each member
-				String ip;
-				while((ip = readProperty("ip")) != null) {
-					readEntry(ip);
-				}
+				readAddresses(true);
+			}
+			pos = rawJson.indexOf(NOT_READY_ADDRESSES, subsets);
+			if (pos > -1) {
+				readAddresses(false);
 			}
 		}
 
 		return members;
+	}
+
+	private void readAddresses(boolean ready) {
+		// loop find each member
+		String ip;
+		while((ip = readProperty("ip")) != null) {
+			readEntry(ip, ready);
+		}
 	}
 
 	/**
@@ -53,7 +59,6 @@ class MemberParser {
 	 */
 	private String readProperty(String propertyName) {
 		String key = jsonKey(propertyName);
-		// find "ip":"
 		pos = rawJson.indexOf(key, pos);
 		if (pos > -1) {
 			int startPos = pos + key.length();
@@ -70,10 +75,10 @@ class MemberParser {
 	/**
 	 * Read and build the K8sServiceMember.
 	 */
-	private void readEntry(String ipAddress) {
+	private void readEntry(String ipAddress, boolean ready) {
 		String nodeName = readProperty("nodeName");
 		String podName = readProperty("name");
-		members.add(new K8sServiceMember(ipAddress, nodeName, podName));
+		members.add(ready, new K8sServiceMember(ipAddress, nodeName, podName, ready));
 	}
 
 	private String jsonKey(String property) {
